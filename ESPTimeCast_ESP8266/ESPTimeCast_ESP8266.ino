@@ -55,7 +55,7 @@ time_t lastGlucoseTime = 0;  // store timestamp from JSON
 const char *DEFAULT_HOSTNAME = "esptimecast";
 const char *DEFAULT_AP_PASSWORD = "12345678";
 const char *DEFAULT_AP_SSID = "ESPTimeCast";
-String deviceHostname = DEFAULT_HOSTNAME;
+char deviceHostname[32] = "esptimecast";
 
 // WiFi and configuration globals
 char ssid[32] = "";
@@ -288,6 +288,7 @@ void loadConfig() {
     doc[F("sunsetHour")] = sunsetHour;
     doc[F("sunsetMinute")] = sunsetMinute;
     doc[F("clockOnlyDuringDimming")] = false;
+    doc[F("hostname")] = DEFAULT_HOSTNAME;
 
     // Add countdown defaults when creating a new config.json
     JsonObject countdownObj = doc.createNestedObject("countdown");
@@ -399,6 +400,20 @@ void loadConfig() {
   strlcpy(ntpServer1, doc["ntpServer1"] | "pool.ntp.org", sizeof(ntpServer1));
   strlcpy(ntpServer2, doc["ntpServer2"] | "time.nist.gov", sizeof(ntpServer2));
 
+  if (doc.containsKey("hostname")) {
+    String raw = doc["hostname"].as<String>();
+    raw.trim();
+    raw.toLowerCase();
+    String h;
+    for (unsigned int i = 0; i < raw.length() && h.length() < (unsigned int)(sizeof(deviceHostname) - 1); i++) {
+      char c = raw[i];
+      if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') h += c;
+    }
+    if (h.length() > 0) {
+      strlcpy(deviceHostname, h.c_str(), sizeof(deviceHostname));
+    }
+  }
+
   if (strcmp(weatherUnits, "imperial") == 0)
     tempSymbol = ']';
   else
@@ -470,7 +485,7 @@ void setupHostname() {
 #if defined(ESP8266)
   WiFi.hostname(deviceHostname);
 #elif defined(ESP32)
-  WiFi.setHostname(deviceHostname.c_str());
+  WiFi.setHostname(deviceHostname);
 #endif
 }
 
@@ -606,11 +621,11 @@ void connectWiFi() {
 void setupMDNS() {
   MDNS.end();
 
-  bool mdnsStarted = MDNS.begin(deviceHostname.c_str());
+  bool mdnsStarted = MDNS.begin(deviceHostname);
 
   if (mdnsStarted) {
     MDNS.addService("http", "tcp", 80);
-    Serial.printf("[WIFI] mDNS started: http://%s.local\n", deviceHostname.c_str());
+    Serial.printf("[WIFI] mDNS started: http://%s.local\n", deviceHostname);
   } else {
     Serial.println("[WIFI] mDNS failed to start");
   }
@@ -621,7 +636,7 @@ void setupOTA() {
   ArduinoOTA.setPort(8266);
 
   // Hostname defaults to esp8266-[ChipID]
-  ArduinoOTA.setHostname(deviceHostname.c_str());
+  ArduinoOTA.setHostname(deviceHostname);
 
   ArduinoOTA.onStart([]()
              {
@@ -942,6 +957,17 @@ void setupWebServer() {
         }
       } else if (n == "weatherProvider" || n == "haBaseUrl" || n == "haWeatherEntity") {
         doc[n] = v;
+      } else if (n == "hostname") {
+        String raw = v;
+        raw.trim();
+        raw.toLowerCase();
+        String h;
+        for (unsigned int i = 0; i < raw.length() && h.length() < (unsigned int)(sizeof(deviceHostname) - 1); i++) {
+          char c = raw[i];
+          if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') h += c;
+        }
+        if (h.length() == 0) h = DEFAULT_HOSTNAME;
+        doc[n] = h;
       } else {
         doc[n] = v;
       }
@@ -1625,8 +1651,7 @@ void setupWebServer() {
     if (WiFi.getMode() == WIFI_AP) {
       request->send(200, "text/plain", "AP-Mode");
     } else {
-      String host = deviceHostname + ".local";
-      request->send(200, "text/plain", host);
+      request->send(200, "text/plain", String(deviceHostname) + ".local");
     }
   });
 
@@ -1753,6 +1778,7 @@ void setupWebServer() {
 
     // --- Saved Config ---
     JsonObject config = doc.createNestedObject("config");
+    config["hostname"] = String(deviceHostname);
     config["ssid"] = String(ssid);
     config["openWeatherApiKey"] = (strlen(openWeatherApiKey) > 0) ? "***HIDDEN***" : "";
     config["weatherProvider"] = String(weatherProvider);
@@ -3038,6 +3064,8 @@ void ensureHtmlFileExists() {
 }
 
 void advanceDisplayMode() {
+  Serial.print(F("[DEBUG] Free memory: "));
+  Serial.println(ESP.getFreeHeap());
 
   // If user requested clock-only during dimming and we are currently dimmed, stay on clock
   if (clockOnlyDuringDimming) {
@@ -4251,9 +4279,10 @@ void loop() {
     // -------------------------
     String dateString;
 
-    // Get localized month names
-    const char *const *months = getMonthsOfYear(language);
-    String monthAbbr = String(months[timeinfo.tm_mon]).substring(0, 5);
+    // Get localized month names (from PROGMEM)
+    char monthBuf[16];
+    getMonthDisplay(language, timeinfo.tm_mon, monthBuf, sizeof(monthBuf));
+    String monthAbbr = String(monthBuf).substring(0, 5);
     monthAbbr.toLowerCase();
 
     // Add spaces between day digits

@@ -1,12 +1,15 @@
 #ifndef TZ_LOOKUP_H
 #define TZ_LOOKUP_H
 
+#include <string.h>
+#include <pgmspace.h>
+
 typedef struct {
     const char* iana;
     const char* posix;
 } TimeZoneMapping;
 
-const TimeZoneMapping tz_mappings[] = {
+const TimeZoneMapping tz_mappings[] PROGMEM = {
     {"Africa/Cairo", "EET-2EEST,M4.5.5/0,M10.5.5/0"},
     {"Africa/Casablanca", "WET0WEST,M3.5.0/0,M10.5.0/0"},
     {"Africa/Johannesburg", "SAST-2"},
@@ -94,12 +97,19 @@ const TimeZoneMapping tz_mappings[] = {
 
 #define TZ_MAPPINGS_COUNT (sizeof(tz_mappings)/sizeof(tz_mappings[0]))
 
+// Returns posix TZ string in a static buffer (valid until next call). Reads from PROGMEM.
 inline const char* ianaToPosix(const char* iana) {
+    static char buf[64];
     for (size_t i = 0; i < TZ_MAPPINGS_COUNT; i++) {
-        if (strcmp(iana, tz_mappings[i].iana) == 0)
-            return tz_mappings[i].posix;
+        PGM_P pIana = (PGM_P)pgm_read_ptr(&tz_mappings[i].iana);
+        if (strcmp_P(iana, pIana) == 0) {
+            PGM_P pPosix = (PGM_P)pgm_read_ptr(&tz_mappings[i].posix);
+            strcpy_P(buf, pPosix);
+            return buf;
+        }
     }
-    return "UTC0"; // fallback
+    strcpy_P(buf, PSTR("UTC0"));
+    return buf;
 }
 
 #endif // TZ_LOOKUP_H

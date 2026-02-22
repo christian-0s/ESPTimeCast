@@ -1518,9 +1518,20 @@ opacity: 0.5;
               <span>IP: 
                 <span id="ipDisplay">Fetching...</span>
               </span><br><br>
-              <span>Hostname: 
-                <span id="hostnameDisplay">Fetching...</span>
-              </span><br><br>
+              <label for="hostname">Hostname (mDNS: <span id="hostnameDisplay">—</span>.local)</label>
+              <input
+                type="text"
+                id="hostname"
+                name="hostname"
+                class="form-control"
+                placeholder="esptimecast"
+                maxlength="31"
+                pattern="[a-zA-Z0-9\-]+"
+                title="Lowercase letters, numbers, hyphens only. Max 31 chars."
+              />
+              <div class="small" style="margin-top: 0.25rem; opacity: 0.7;">
+                Used for http://hostname.local. Takes effect after reboot.
+              </div><br>
               <span>Uptime: 
                 <span id="uptimeDisplay">Loading...</span>
               </span>
@@ -1678,6 +1689,21 @@ opacity: 0.5;
               ? "Off"
               : brightnessSlider.value;
             document.getElementById("flipDisplay").checked = !!data.flipDisplay;
+            document.getElementById("hostname").value =
+              data.hostname || "esptimecast";
+            const hostnameInput = document.getElementById("hostname");
+            const hostnameDisplay = document.getElementById("hostnameDisplay");
+            if (hostnameInput && hostnameDisplay) {
+              hostnameDisplay.textContent = hostnameInput.value || "—";
+              hostnameInput.addEventListener("input", function () {
+                let v = this.value
+                  .toLowerCase()
+                  .replace(/[^a-z0-9\-]/g, "")
+                  .substring(0, 31);
+                this.value = v;
+                hostnameDisplay.textContent = v || "—";
+              });
+            }
             document.getElementById("ntpServer1").value = data.ntpServer1 || "";
             document.getElementById("ntpServer2").value = data.ntpServer2 || "";
             document.getElementById("twelveHourToggle").checked =
@@ -1995,6 +2021,11 @@ opacity: 0.5;
             ? "imperial"
             : "metric",
         );
+        const hostnameVal = (document.getElementById("hostname").value || "")
+          .toLowerCase()
+          .replace(/[^a-z0-9\-]/g, "")
+          .substring(0, 31) || "esptimecast";
+        formData.set("hostname", hostnameVal);
 
         // --- NEW: Countdown Form Data ---
         formData.set(
@@ -2887,17 +2918,6 @@ opacity: 0.5;
             if (el) el.textContent = "—";
           });
 
-        // --- Hostname ---
-        fetch("/hostname")
-          .then((r) => r.text())
-          .then((host) => {
-            const el = document.getElementById("hostnameDisplay");
-            if (el) el.textContent = host || "—";
-          })
-          .catch(() => {
-            const el = document.getElementById("hostnameDisplay");
-            if (el) el.textContent = "—";
-          });
       });
 
       const ssidInput = document.getElementById("ssid");

@@ -1,12 +1,15 @@
 #ifndef MONTHS_LOOKUP_H
 #define MONTHS_LOOKUP_H
 
+#include <string.h>
+#include <pgmspace.h>
+
 typedef struct {
     const char* lang;
     const char* months[12]; // Jan to Dec
 } MonthsMapping;
 
-const MonthsMapping months_mappings[] = {
+const MonthsMapping months_mappings[] PROGMEM = {
     { "af", { "j&a&n", "f&e&b", "m&a&r", "a&p&r", "m&e&i", "j&u&n", "j&u&l", "a&u&g", "s&e&p", "o&k&t", "n&o&v", "d&e&s" } }, // Afrikaans
     { "cs", { "l&e&d", "u&n&o", "b&r&e", "d&u&b", "k&v&e", "c&e&r", "c&v&c", "s&r&p", "z&a&r", "r&i&j", "l&i&s", "p&r&o" } }, // Czech
     { "da", { "j&a&n", "f&e&b", "m&a&r", "a&p&r", "m&a&j", "j&u&n", "j&u&l", "a&u&g", "s&e&p", "o&k&t", "n&o&v", "d&e&c" } }, // Danish
@@ -40,13 +43,26 @@ const MonthsMapping months_mappings[] = {
 
 #define MONTHS_MAPPINGS_COUNT (sizeof(months_mappings)/sizeof(months_mappings[0]))
 
-inline const char* const* getMonthsOfYear(const char* lang) {
+// Copies localized month string into buf for given language and month index (0-11). Uses PROGMEM.
+inline bool getMonthDisplay(const char* lang, int monthIndex, char* buf, size_t bufSize) {
+    if (monthIndex < 0 || monthIndex >= 12 || !buf || bufSize == 0) return false;
+    PGM_P pStr = nullptr;
     for (size_t i = 0; i < MONTHS_MAPPINGS_COUNT; i++) {
-        if (strcmp(lang, months_mappings[i].lang) == 0)
-            return months_mappings[i].months;
+        PGM_P pLang = (PGM_P)pgm_read_ptr(&months_mappings[i].lang);
+        if (strcmp_P(lang, pLang) == 0) {
+            pStr = (PGM_P)pgm_read_ptr(&months_mappings[i].months[monthIndex]);
+            break;
+        }
     }
-    // fallback to English if not found
-    return months_mappings[4].months; // "en" is index 4
+    if (!pStr) {
+        pStr = (PGM_P)pgm_read_ptr(&months_mappings[4].months[monthIndex]); // "en" fallback
+    }
+    if (pStr) {
+        strncpy_P(buf, pStr, bufSize - 1);
+        buf[bufSize - 1] = '\0';
+        return true;
+    }
+    return false;
 }
 
 #endif // MONTHS_LOOKUP_H
