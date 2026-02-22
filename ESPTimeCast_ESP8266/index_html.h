@@ -2778,7 +2778,7 @@ opacity: 0.5;
             (hasSavedHaToken || (haTok !== "" && haTok !== HA_TOKEN_MASK));
         }
 
-        // --- 1. Control Auto Dimming based on Weather Config Presence ---
+        // --- 1. Control Auto Dimming based on Key Presence ---
         // Meets requirement: "when page load after autodim has been saved to json,
         // if user removes the api key (masked) the toggle auto dim toggle should get disabled"
         if (!isKeyPresent) {
