@@ -20,7 +20,7 @@
 #include "months_lookup.h"  // Languages for the Months of the Year
 #include "index_html.h"     // Web UI
 
-#define FIRMWARE_VERSION "1.1.1"
+#define FIRMWARE_VERSION "1.1.3"
 #define HARDWARE_TYPE MD_MAX72XX::FC16_HW
 #define MAX_DEVICES 4
 #define CLK_PIN 14   //D5
@@ -65,6 +65,9 @@ char weatherUnits[12] = "metric";
 char timeZone[64] = "";
 char language[8] = "en";
 unsigned long lastWifiConnectTime = 0;
+unsigned long lastDotPrintTime = 0;
+unsigned long startAPModeTime = 0;
+const unsigned long apTimeout = 150000;
 String mainDesc = "";
 String detailedDesc = "";
 
@@ -492,6 +495,7 @@ void connectWiFi() {
                                                                  : "UNKNOWN");
 
     Serial.println(F("[WIFI] AP Mode Started"));
+    startAPModeTime = millis();
     return;
   }
 
@@ -560,6 +564,7 @@ void connectWiFi() {
 
       animating = false;
       Serial.println(F("[WIFI] AP Mode Started"));
+      startAPModeTime = millis();
       break;
     }
     if (now - animTimer > 750) {
@@ -3007,6 +3012,16 @@ void loop() {
       case 0: P.print(F("= ©")); break;
       case 1: P.print(F("= ª")); break;
       case 2: P.print(F("= «")); break;
+    }
+    if (now - startAPModeTime <= apTimeout) {
+      if (now - lastDotPrintTime > 1000) {
+        Serial.print(F("."));
+        lastDotPrintTime = now;
+      }
+    } else {
+      Serial.println(F(""));
+      Serial.println(F("[WIFI] AP Mode timeout. Restarting..."));
+      ESP.restart();
     }
     yield();
     return;
