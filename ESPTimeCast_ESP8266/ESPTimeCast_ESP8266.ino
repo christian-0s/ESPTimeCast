@@ -13,11 +13,13 @@
 #include <time.h>
 #include <WiFiClientSecure.h>
 #include <ESP8266mDNS.h>
+#include <ArduinoOTA.h>
 
 #include "mfactoryfont.h"   // Custom font
 #include "tz_lookup.h"      // Timezone lookup, do not duplicate mapping here!
 #include "days_lookup.h"    // Languages for the Days of the Week
 #include "months_lookup.h"  // Languages for the Months of the Year
+#include "weather_conditions_lookup.h"  // Languages for weather descriptions
 #include "index_html.h"     // Web UI
 
 #define FIRMWARE_VERSION "1.1.3"
@@ -62,6 +64,10 @@ char openWeatherApiKey[64] = "";
 char openWeatherCity[64] = "";
 char openWeatherCountry[64] = "";
 char weatherUnits[12] = "metric";
+char weatherProvider[24] = "openweathermap";
+char haBaseUrl[128] = "";
+char haToken[256] = "";
+char haWeatherEntity[64] = "";
 char timeZone[64] = "";
 char language[8] = "en";
 unsigned long lastWifiConnectTime = 0;
@@ -216,6 +222,11 @@ const char *getSafeApiKey() {
   }
 }
 
+const char *getSafeHaToken() {
+  if (strlen(haToken) == 0) return "";
+  return "********";  // Always masked
+}
+
 // Scroll flipped
 textEffect_t getEffectiveScrollDirection(textEffect_t desiredDirection, bool isFlipped) {
   if (isFlipped) {
@@ -245,6 +256,10 @@ void loadConfig() {
     doc[F("openWeatherCity")] = "";
     doc[F("openWeatherCountry")] = "";
     doc[F("weatherUnits")] = "metric";
+    doc[F("weatherProvider")] = "openweathermap";
+    doc[F("haBaseUrl")] = "";
+    doc[F("haToken")] = "";
+    doc[F("haWeatherEntity")] = "";
     doc[F("clockDuration")] = 10000;
     doc[F("weatherDuration")] = 5000;
     doc[F("timeZone")] = "";
@@ -316,6 +331,10 @@ void loadConfig() {
   strlcpy(openWeatherCity, doc["openWeatherCity"] | "", sizeof(openWeatherCity));
   strlcpy(openWeatherCountry, doc["openWeatherCountry"] | "", sizeof(openWeatherCountry));
   strlcpy(weatherUnits, doc["weatherUnits"] | "metric", sizeof(weatherUnits));
+  strlcpy(weatherProvider, doc["weatherProvider"] | "openweathermap", sizeof(weatherProvider));
+  strlcpy(haBaseUrl, doc["haBaseUrl"] | "", sizeof(haBaseUrl));
+  strlcpy(haToken, doc["haToken"] | "", sizeof(haToken));
+  strlcpy(haWeatherEntity, doc["haWeatherEntity"] | "", sizeof(haWeatherEntity));
   strlcpy(customMessage, doc["customMessage"] | "", sizeof(customMessage));
   strlcpy(lastPersistentMessage, customMessage, sizeof(lastPersistentMessage));
   clockDuration = doc["clockDuration"] | 10000;
@@ -597,6 +616,50 @@ void setupMDNS() {
   }
 }
 
+void setupOTA() {
+  // Port defaults to 8266
+  ArduinoOTA.setPort(8266);
+
+  // Hostname defaults to esp8266-[ChipID]
+  ArduinoOTA.setHostname(deviceHostname.c_str());
+
+  ArduinoOTA.onStart([]()
+             {
+    String type;
+    if (ArduinoOTA.getCommand() == U_FLASH) {
+      type = "sketch";
+    } else { // U_FS
+      type = "filesystem";
+    }
+
+    // NOTE: if updating FS this would be the place to unmount FS using FS.end()
+    Serial.println("Start updating " + type); });
+
+  ArduinoOTA.onEnd([]()
+           { Serial.println("\nEnd"); });
+
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total)
+              { Serial.printf("Progress: %u%%\r", (progress / (total / 100))); });
+
+  ArduinoOTA.onError([](ota_error_t error)
+             {
+    Serial.printf("Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) {
+      Serial.println("Auth Failed");
+    } else if (error == OTA_BEGIN_ERROR) {
+      Serial.println("Begin Failed");
+    } else if (error == OTA_CONNECT_ERROR) {
+      Serial.println("Connect Failed");
+    } else if (error == OTA_RECEIVE_ERROR) {
+      Serial.println("Receive Failed");
+    } else if (error == OTA_END_ERROR) {
+      Serial.println("End Failed");
+    } });
+
+  ArduinoOTA.begin();
+
+}
+
 // -----------------------------------------------------------------------------
 // Time / NTP Functions
 // -----------------------------------------------------------------------------
@@ -797,6 +860,7 @@ void setupWebServer() {
     doc[F("ssid")] = getSafeSsid();
     doc[F("password")] = getSafePassword();
     doc[F("openWeatherApiKey")] = getSafeApiKey();
+    doc[F("haToken")] = getSafeHaToken();
     doc[F("mode")] = isAPMode ? "ap" : "sta";
 
     String response;
@@ -869,6 +933,15 @@ void setupWebServer() {
         } else {
           Serial.println(F("[SAVE] API key unchanged (mask ignored)."));
         }
+      } else if (n == "haToken") {
+        if (v != "********" && v.length() > 0) {
+          doc[n] = v;
+          Serial.println(F("[SAVE] HA token updated."));
+        } else if (v.length() == 0) {
+          doc[n] = "";
+        }
+      } else if (n == "weatherProvider" || n == "haBaseUrl" || n == "haWeatherEntity") {
+        doc[n] = v;
       } else {
         doc[n] = v;
       }
@@ -1682,6 +1755,10 @@ void setupWebServer() {
     JsonObject config = doc.createNestedObject("config");
     config["ssid"] = String(ssid);
     config["openWeatherApiKey"] = (strlen(openWeatherApiKey) > 0) ? "***HIDDEN***" : "";
+    config["weatherProvider"] = String(weatherProvider);
+    config["haBaseUrl"] = String(haBaseUrl);
+    config["haToken"] = (strlen(haToken) > 0) ? "***HIDDEN***" : "";
+    config["haWeatherEntity"] = String(haWeatherEntity);
     config["openWeatherCity"] = String(openWeatherCity);
     config["weatherUnits"] = String(weatherUnits);
     config["clockDuration"] = clockDuration;
@@ -1749,6 +1826,7 @@ void setupWebServer() {
       doc["ssid"] = "********";
       doc["password"] = "********";
       doc["openWeatherApiKey"] = "********************************";
+      doc["haToken"] = "********";
     }
 
     doc["mode"] = isAPMode ? "ap" : "sta";
@@ -2195,6 +2273,33 @@ bool isFiveDigitZip(const char *str) {
   return true;
 }
 
+bool isWeatherConfigured() {
+  if (strcmp(weatherProvider, "homeassistant") == 0) {
+    return strlen(haBaseUrl) > 0 && strlen(haToken) > 0 && strlen(haWeatherEntity) > 0;
+  }
+  return strlen(openWeatherApiKey) == 32 && strlen(openWeatherCity) > 0 && strlen(openWeatherCountry) > 0;
+}
+
+static time_t utcToEpoch(int year, int month, int day, int hour, int min, int sec) {
+  if (month < 1 || month > 12) return 0;
+  const int daysBefore[] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+  int y = year - 1970;
+  int leaps = (y + 1) / 4 - (y + 69) / 100 + (y + 369) / 400;
+  long days = (long)y * 365 + leaps + daysBefore[month - 1] + day - 1;
+  if (month > 2 && (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)))
+    days++;
+  return (time_t)(days * 86400L + hour * 3600L + min * 60L + sec);
+}
+
+String haConditionToDisplay(const char *condition) {
+  if (!condition || strlen(condition) == 0) return "";
+  int idx = weatherConditionToIndex(condition);
+  if (idx < 0) return String(condition);
+  char buf[48];
+  if (getWeatherConditionDisplay(language, idx, buf, sizeof(buf)))
+    return String(buf);
+  return String(condition);
+}
 
 // -----------------------------------------------------------------------------
 // Weather Fetching and API settings
@@ -2237,6 +2342,169 @@ String buildWeatherURL() {
   return base;
 }
 
+String buildHAWeatherURL() {
+  String base = String(haBaseUrl);
+  if (!base.endsWith("/")) base += "/";
+  return base + "api/states/" + String(haWeatherEntity);
+}
+
+String buildHASunURL() {
+  String base = String(haBaseUrl);
+  if (!base.endsWith("/")) base += "/";
+  return base + "api/states/sun.sun";
+}
+
+void fetchWeatherFromHA() {
+  Serial.println(F("[WEATHER] Connecting to Home Assistant..."));
+  String url = buildHAWeatherURL();
+  Serial.print(F("[DEBUG] haToken: "));
+  Serial.println(String(haToken));
+  Serial.print(F("[DEBUG] HA url: "));
+  Serial.println(url);
+
+  HTTPClient http;
+  WiFiClient haClient;
+  haClient.stop();
+  yield();
+
+  http.begin(haClient, url);
+  http.addHeader("Authorization", "Bearer " + String(haToken));
+  http.setTimeout(10000);
+
+  int httpCode = http.GET();
+
+  if (httpCode != HTTP_CODE_OK) {
+    Serial.printf("[WEATHER] HA weather GET failed: %d\n", httpCode);
+    weatherAvailable = false;
+    weatherFetched = false;
+    http.end();
+    return;
+  }
+
+  String payload = http.getString();
+  http.end();
+
+  DynamicJsonDocument doc(1024);
+  DeserializationError error = deserializeJson(doc, payload);
+  if (error) {
+    Serial.print(F("[WEATHER] HA JSON parse error: "));
+    Serial.println(error.f_str());
+    weatherAvailable = false;
+    return;
+  }
+
+  JsonObject attrs = doc["attributes"].as<JsonObject>();
+  if (!attrs.containsKey("temperature")) {
+    Serial.println(F("[WEATHER] HA: temperature not found"));
+    weatherAvailable = false;
+    return;
+  }
+
+  float temp = attrs["temperature"].as<float>();
+  if (strcmp(weatherUnits, "imperial") == 0) {
+    const char *unit = attrs["temperature_unit"] | "°C";
+    if (strcmp(unit, "°C") == 0) {
+      temp = temp * 9.0f / 5.0f + 32.0f;
+    }
+  } else {
+    const char *unit = attrs["temperature_unit"] | "°F";
+    if (strcmp(unit, "°F") == 0) {
+      temp = (temp - 32.0f) * 5.0f / 9.0f;
+    }
+  }
+  currentTemp = String((int)round(temp)) + "°";
+  weatherAvailable = true;
+
+  currentHumidity = attrs.containsKey("humidity") ? (int)attrs["humidity"].as<float>() : -1;
+
+  String condition = doc["state"] | "";
+  detailedDesc = haConditionToDisplay(condition.c_str());
+  weatherDescription = normalizeWeatherDescription(detailedDesc);
+
+  url = buildHASunURL();
+  http.begin(haClient, url);
+  http.addHeader("Authorization", "Bearer " + String(haToken));
+  http.setTimeout(10000);
+  httpCode = http.GET();
+  if (httpCode == HTTP_CODE_OK) {
+    String sunPayload = http.getString();
+    DynamicJsonDocument sunDoc(512);
+    if (!deserializeJson(sunDoc, sunPayload)) {
+      JsonObject sunAttrs = sunDoc["attributes"].as<JsonObject>();
+      if (sunAttrs.containsKey("next_rising") && sunAttrs.containsKey("next_setting")) {
+        const char *riseStr = sunAttrs["next_rising"];
+        const char *setStr = sunAttrs["next_setting"];
+        struct tm tmRise = {}, tmSet = {};
+        int yr, mon, day, hr, min, sec;
+        if (sscanf(riseStr, "%d-%d-%dT%d:%d:%d", &yr, &mon, &day, &hr, &min, &sec) >= 5) {
+          tmRise.tm_year = yr - 1900;
+          tmRise.tm_mon = mon - 1;
+          tmRise.tm_mday = day;
+          tmRise.tm_hour = hr;
+          tmRise.tm_min = min;
+          tmRise.tm_sec = sec;
+          tmRise.tm_isdst = -1;
+          time_t sunriseUtc = utcToEpoch(yr, mon, day, hr, min, sec);
+          long tzOffset = 0;
+          struct tm local_tm;
+          time_t now = time(nullptr);
+          if (localtime_r(&now, &local_tm)) {
+            tzOffset = mktime(&local_tm) - now;
+          }
+          time_t sunriseLocal = sunriseUtc + tzOffset;
+          localtime_r(&sunriseLocal, &tmRise);
+          sunriseHour = tmRise.tm_hour;
+          sunriseMinute = tmRise.tm_min;
+        }
+        if (sscanf(setStr, "%d-%d-%dT%d:%d:%d", &yr, &mon, &day, &hr, &min, &sec) >= 5) {
+          tmSet.tm_year = yr - 1900;
+          tmSet.tm_mon = mon - 1;
+          tmSet.tm_mday = day;
+          tmSet.tm_hour = hr;
+          tmSet.tm_min = min;
+          tmSet.tm_sec = sec;
+          tmSet.tm_isdst = -1;
+          time_t sunsetUtc = utcToEpoch(yr, mon, day, hr, min, sec);
+          long tzOffset = 0;
+          struct tm local_tm;
+          time_t now = time(nullptr);
+          if (localtime_r(&now, &local_tm)) {
+            tzOffset = mktime(&local_tm) - now;
+          }
+          time_t sunsetLocal = sunsetUtc + tzOffset;
+          localtime_r(&sunsetLocal, &tmSet);
+          sunsetHour = tmSet.tm_hour;
+          sunsetMinute = tmSet.tm_min;
+        }
+      }
+    }
+  }
+  http.end();
+
+  weatherFetched = true;
+
+  if (autoDimmingEnabled && sunriseHour >= 0 && sunsetHour >= 0) {
+    File configFile = LittleFS.open("/config.json", "r");
+    DynamicJsonDocument cfgDoc(1024);
+    if (configFile) {
+      if (!deserializeJson(cfgDoc, configFile)) {
+        bool valuesChanged = (cfgDoc["sunriseHour"].as<int>() != sunriseHour || cfgDoc["sunriseMinute"].as<int>() != sunriseMinute || cfgDoc["sunsetHour"].as<int>() != sunsetHour || cfgDoc["sunsetMinute"].as<int>() != sunsetMinute);
+        if (valuesChanged) {
+          cfgDoc["sunriseHour"] = sunriseHour;
+          cfgDoc["sunriseMinute"] = sunriseMinute;
+          cfgDoc["sunsetHour"] = sunsetHour;
+          cfgDoc["sunsetMinute"] = sunsetMinute;
+          File f = LittleFS.open("/config.json", "w");
+          if (f) {
+            serializeJsonPretty(cfgDoc, f);
+            f.close();
+          }
+        }
+      }
+      configFile.close();
+    }
+  }
+}
 
 void fetchWeather() {
   if (millis() - lastWifiConnectTime < 5000) {
@@ -2251,6 +2519,18 @@ void fetchWeather() {
     weatherFetched = false;
     return;
   }
+
+  if (strcmp(weatherProvider, "homeassistant") == 0) {
+    if (!isWeatherConfigured()) {
+      Serial.println(F("[WEATHER] Skipped: Home Assistant not configured (URL, token, entity required)."));
+      weatherAvailable = false;
+      weatherFetched = false;
+      return;
+    }
+    fetchWeatherFromHA();
+    return;
+  }
+
   if (!openWeatherApiKey || strlen(openWeatherApiKey) != 32) {
     Serial.println(F("[WEATHER] Skipped: Invalid API key (must be exactly 32 characters)"));
     weatherAvailable = false;
@@ -2658,6 +2938,7 @@ void setup() {
   }
   if (!isAPMode && WiFi.status() == WL_CONNECTED) {
     setupMDNS();
+    setupOTA();
   }
   setupWebServer();
   Serial.println(F("[SETUP] Webserver setup complete"));
@@ -2799,7 +3080,7 @@ void advanceDisplayMode() {
     if (showDate) {
       displayMode = 5;  // Date mode right after Clock
       Serial.println(F("[DISPLAY] Switching to display mode: DATE (from Clock)"));
-    } else if (weatherAvailable && (strlen(openWeatherApiKey) == 32) && (strlen(openWeatherCity) > 0) && (strlen(openWeatherCountry) > 0)) {
+    } else if (weatherAvailable && isWeatherConfigured()) {
       displayMode = 1;
       Serial.println(F("[DISPLAY] Switching to display mode: WEATHER (from Clock)"));
     } else if (countdownEnabled && !countdownFinished && ntpSyncSuccessful && countdownTargetTimestamp > 0 && countdownTargetTimestamp > time(nullptr)) {
@@ -2813,7 +3094,7 @@ void advanceDisplayMode() {
       Serial.println(F("[DISPLAY] Staying in CLOCK (from Clock)"));
     }
   } else if (displayMode == 5) {  // Date mode
-    if (weatherAvailable && (strlen(openWeatherApiKey) == 32) && (strlen(openWeatherCity) > 0) && (strlen(openWeatherCountry) > 0)) {
+    if (weatherAvailable && isWeatherConfigured()) {
       displayMode = 1;
       Serial.println(F("[DISPLAY] Switching to display mode: WEATHER (from Date)"));
     } else if (countdownEnabled && !countdownFinished && ntpSyncSuccessful && countdownTargetTimestamp > 0 && countdownTargetTimestamp > time(nullptr)) {
@@ -2891,7 +3172,7 @@ void advanceDisplayModeSafe() {
 
     if (displayMode == 0) valid = true;  // Clock always valid
     else if (displayMode == 5 && showDate) valid = true;
-    else if (displayMode == 1 && weatherAvailable && (strlen(openWeatherApiKey) == 32) && (strlen(openWeatherCity) > 0) && (strlen(openWeatherCountry) > 0)) valid = true;
+    else if (displayMode == 1 && weatherAvailable && isWeatherConfigured()) valid = true;
     else if (displayMode == 2 && showWeatherDescription && weatherAvailable && weatherDescription.length() > 0) valid = true;
     else if (displayMode == 3 && countdownEnabled && !countdownFinished && ntpSyncSuccessful) valid = true;
     else if (displayMode == 4 && nightscoutConfigured) valid = true;
@@ -3044,6 +3325,7 @@ void loop() {
 
   // mDNS update 8266 only
   MDNS.update();
+  ArduinoOTA.handle();
 
 
   // -----------------------------
@@ -3457,7 +3739,7 @@ void loop() {
     String desc = weatherDescription;
 
     // --- Check if humidity is actually visible ---
-    bool humidityVisible = showHumidity && weatherAvailable && strlen(openWeatherApiKey) == 32 && strlen(openWeatherCity) > 0 && strlen(openWeatherCountry) > 0;
+    bool humidityVisible = showHumidity && weatherAvailable && isWeatherConfigured();
 
     // --- Conditional padding ---
     bool addPadding = false;
@@ -3787,7 +4069,7 @@ void loop() {
 
         String fullString = String(buf);
         bool addPadding = false;
-        bool humidityVisible = showHumidity && weatherAvailable && strlen(openWeatherApiKey) == 32 && strlen(openWeatherCity) > 0 && strlen(openWeatherCountry) > 0;
+        bool humidityVisible = showHumidity && weatherAvailable && isWeatherConfigured();
 
         // Padding logic
         if (prevDisplayMode == 0 && (showDayOfWeek || colonBlinkEnabled)) {
@@ -4169,7 +4451,7 @@ void loop() {
 
     // --- Determine if we need left padding based on previous mode ---
     bool addPadding = false;
-    bool humidityVisible = showHumidity && weatherAvailable && strlen(openWeatherApiKey) == 32 && strlen(openWeatherCity) > 0 && strlen(openWeatherCountry) > 0;
+    bool humidityVisible = showHumidity && weatherAvailable && isWeatherConfigured();
 
     // If coming from CLOCK mode
     if (prevDisplayMode == 0 && (showDayOfWeek || colonBlinkEnabled)) {

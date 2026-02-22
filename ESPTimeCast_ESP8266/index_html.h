@@ -1034,40 +1034,102 @@ opacity: 0.5;
       </div>
 
       <h2>Weather Settings</h2>
-      <label for="openWeatherApiKey">OpenWeather API Key</label>
-      <input
-        type="text"
-        id="openWeatherApiKey"
-        name="openWeatherApiKey"
-        placeholder="ADD-YOUR-API-KEY-32-CHARACTERS"
-      />
-      <div class="small">
-        Required to fetch weather data.
-        <a href="https://home.openweathermap.org/users/sign_up" target="_blank"
-          >Get your API key here</a
-        >.
+      <label>Weather Source</label>
+      <div class="form-row" style="margin-bottom: 1rem;">
+        <label class="radio-inline">
+          <input
+            type="radio"
+            name="weatherProvider"
+            value="openweathermap"
+            id="weatherProviderOWM"
+            onchange="toggleWeatherSourceUI()"
+          />
+          OpenWeatherMap
+        </label>
+        <label class="radio-inline">
+          <input
+            type="radio"
+            name="weatherProvider"
+            value="homeassistant"
+            id="weatherProviderHA"
+            onchange="toggleWeatherSourceUI()"
+          />
+          Home Assistant
+        </label>
       </div>
 
-      <label>Location</label>
-      <div class="form-row two-col">
+      <div id="weather-owm-section">
+        <label for="openWeatherApiKey">OpenWeather API Key</label>
         <input
           type="text"
-          id="openWeatherCity"
-          name="openWeatherCity"
-          placeholder="City / Zip / Lat."
+          id="openWeatherApiKey"
+          name="openWeatherApiKey"
+          placeholder="ADD-YOUR-API-KEY-32-CHARACTERS"
         />
-        <input
-          type="text"
-          id="openWeatherCountry"
-          name="openWeatherCountry"
-          placeholder="Country Code / Long."
-        />
+        <div class="small">
+          Required to fetch weather data.
+          <a href="https://home.openweathermap.org/users/sign_up" target="_blank"
+            >Get your API key here</a
+          >.
+        </div>
+
+        <label>Location</label>
+        <div class="form-row two-col">
+          <input
+            type="text"
+            id="openWeatherCity"
+            name="openWeatherCity"
+            placeholder="City / Zip / Lat."
+          />
+          <input
+            type="text"
+            id="openWeatherCountry"
+            name="openWeatherCountry"
+            placeholder="Country Code / Long."
+          />
+        </div>
+
+        <div class="small">
+          <strong>Location format examples:</strong> City, Country Code - Osaka,
+          JP | ZIP, Country Code - 94040, US | Latitude, Longitude - 34.6937,
+          135.5023
+        </div>
       </div>
 
-      <div class="small">
-        <strong>Location format examples:</strong> City, Country Code - Osaka,
-        JP | ZIP, Country Code - 94040, US | Latitude, Longitude - 34.6937,
-        135.5023
+      <div id="weather-ha-section" style="display: none;">
+        <label for="haBaseUrl">Home Assistant Base URL</label>
+        <input
+          type="text"
+          id="haBaseUrl"
+          name="haBaseUrl"
+          placeholder="http://192.168.1.100:8123"
+        />
+        <div class="small">
+          Your Home Assistant instance URL (include http:// or https://).
+        </div>
+
+        <label for="haToken">Long-Lived Access Token</label>
+        <input
+          type="text"
+          id="haToken"
+          name="haToken"
+          placeholder="Paste your token"
+          autocomplete="off"
+        />
+        <div class="small">
+          Create a token in Home Assistant: Profile → Long-Lived Access Tokens.
+        </div>
+
+        <label for="haWeatherEntity">Weather Entity ID</label>
+        <input
+          type="text"
+          id="haWeatherEntity"
+          name="haWeatherEntity"
+          placeholder="weather.home"
+        />
+        <div class="small">
+          e.g. weather.home, weather.openweathermap
+        </div>
       </div>
 
       <button
@@ -1573,6 +1635,24 @@ opacity: 0.5;
               data.openWeatherCity || "";
             document.getElementById("openWeatherCountry").value =
               data.openWeatherCountry || "";
+            const weatherProvider = (data.weatherProvider || "openweathermap");
+            document.getElementById("weatherProviderOWM").checked =
+              weatherProvider === "openweathermap";
+            document.getElementById("weatherProviderHA").checked =
+              weatherProvider === "homeassistant";
+            document.getElementById("haBaseUrl").value =
+              data.haBaseUrl || "";
+            const haTokenEl = document.getElementById("haToken");
+            if (data.haToken && data.haToken.trim() !== "") {
+              haTokenEl.value = "********";
+              hasSavedHaToken = true;
+            } else {
+              haTokenEl.value = "";
+              hasSavedHaToken = false;
+            }
+            document.getElementById("haWeatherEntity").value =
+              data.haWeatherEntity || "";
+            toggleWeatherSourceUI();
             document.getElementById("weatherUnits").checked =
               data.weatherUnits === "imperial";
             document.getElementById("clockDuration").value =
@@ -1640,6 +1720,12 @@ opacity: 0.5;
             // Attach listeners (mutually exclusive + API dependency)
             if (apiInputEl)
               apiInputEl.addEventListener("input", setDimmingFieldsEnabled);
+            ["haBaseUrl", "haToken", "haWeatherEntity"].forEach((id) => {
+              const el = document.getElementById(id);
+              if (el) el.addEventListener("input", setDimmingFieldsEnabled);
+            });
+            document.getElementById("weatherProviderOWM")?.addEventListener("change", setDimmingFieldsEnabled);
+            document.getElementById("weatherProviderHA")?.addEventListener("change", setDimmingFieldsEnabled);
             autoDimmingEl.addEventListener("change", () => {
               if (autoDimmingEl.checked) dimmingEnabledEl.checked = false;
               setDimmingFieldsEnabled();
@@ -1806,6 +1892,24 @@ opacity: 0.5;
           formData.delete("openWeatherApiKey");
         } else {
           formData.set("openWeatherApiKey", apiKeyToSend);
+        }
+
+        formData.set(
+          "weatherProvider",
+          document.getElementById("weatherProviderHA").checked
+            ? "homeassistant"
+            : "openweathermap",
+        );
+        formData.set("haBaseUrl", document.getElementById("haBaseUrl").value);
+        formData.set(
+          "haWeatherEntity",
+          document.getElementById("haWeatherEntity").value,
+        );
+        const haTokenVal = document.getElementById("haToken").value;
+        if (haTokenVal === HA_TOKEN_MASK && hasSavedHaToken) {
+          formData.delete("haToken");
+        } else {
+          formData.set("haToken", haTokenVal);
         }
 
         // Advanced: ensure correct values are set for advanced fields
@@ -2313,6 +2417,16 @@ opacity: 0.5;
         });
       }
 
+      function toggleWeatherSourceUI() {
+        const isHA = document.getElementById("weatherProviderHA").checked;
+        document.getElementById("weather-owm-section").style.display =
+          isHA ? "none" : "block";
+        document.getElementById("weather-ha-section").style.display =
+          isHA ? "block" : "none";
+        const geoBtn = document.getElementById("geo-button");
+        if (geoBtn) geoBtn.style.display = isHA ? "none" : "";
+      }
+
       function setWeatherUnits(val) {
         fetch("/set_units", {
           method: "POST",
@@ -2468,8 +2582,10 @@ opacity: 0.5;
       // --- OpenWeather API Key field UX ---
       const MASK_LENGTH = 32;
       const MASK = "*".repeat(MASK_LENGTH);
+      const HA_TOKEN_MASK = "********";
       const apiInput = document.getElementById("openWeatherApiKey");
       let hasSavedKey = false;
+      let hasSavedHaToken = false;
 
       // --- Initialize the field after config load ---
       if (apiInput.value && apiInput.value.trim() !== "") {
@@ -2645,13 +2761,24 @@ opacity: 0.5;
 
         if (!apiKeyField || !autoDimming || !dimmingEnabled) return;
 
-        const currentApiKeyInput = apiKeyField.value.trim();
-        // Checks if a key is saved (hasSavedKey) OR if the user is currently typing a new one.
-        const isKeyPresent =
-          hasSavedKey ||
-          (currentApiKeyInput !== "" && currentApiKeyInput !== MASK);
+        const isOWM = document.getElementById("weatherProviderOWM")?.checked;
+        let isKeyPresent;
+        if (isOWM) {
+          const currentApiKeyInput = apiKeyField.value.trim();
+          isKeyPresent =
+            hasSavedKey ||
+            (currentApiKeyInput !== "" && currentApiKeyInput !== MASK);
+        } else {
+          const haBase = (document.getElementById("haBaseUrl")?.value || "").trim();
+          const haEntity = (document.getElementById("haWeatherEntity")?.value || "").trim();
+          const haTok = (document.getElementById("haToken")?.value || "").trim();
+          isKeyPresent =
+            haBase !== "" &&
+            haEntity !== "" &&
+            (hasSavedHaToken || (haTok !== "" && haTok !== HA_TOKEN_MASK));
+        }
 
-        // --- 1. Control Auto Dimming based on Key Presence ---
+        // --- 1. Control Auto Dimming based on Weather Config Presence ---
         // Meets requirement: "when page load after autodim has been saved to json,
         // if user removes the api key (masked) the toggle auto dim toggle should get disabled"
         if (!isKeyPresent) {
