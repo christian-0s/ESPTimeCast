@@ -1701,7 +1701,8 @@ void setupWebServer() {
     if (WiFi.getMode() == WIFI_AP) {
       request->send(200, "text/plain", "AP-Mode");
     } else {
-      request->send(200, "text/plain", String(deviceHostname) + ".local");
+      String host = String(deviceHostname) + ".local";
+      request->send(200, "text/plain", host);
     }
   });
 
