@@ -15,14 +15,21 @@
 #include <ESP8266mDNS.h>
 #include <ArduinoOTA.h>
 
+// Font handling (upstream-style with fallback)
+#if __has_include("mfactoryfont.h")
 #include "mfactoryfont.h"   // Custom font
+#define USE_CUSTOM_FONT
+#else
+#include "basic_font.h"     // Fallback font from upstream
+#endif
+
 #include "tz_lookup.h"      // Timezone lookup, do not duplicate mapping here!
 #include "days_lookup.h"    // Languages for the Days of the Week
 #include "months_lookup.h"  // Languages for the Months of the Year
 #include "weather_conditions_lookup.h"  // Languages for weather descriptions
 #include "index_html.h"     // Web UI
 
-#define FIRMWARE_VERSION "1.1.1"
+#define FIRMWARE_VERSION "1.2.3"
 #define HARDWARE_TYPE MD_MAX72XX::FC16_HW
 #define MAX_DEVICES 4
 #define CLK_PIN 14   //D5
